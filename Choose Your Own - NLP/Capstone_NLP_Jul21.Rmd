@@ -1,0 +1,1067 @@
+---
+title: 'HarvardX Data Science Capstone: Choice Project'
+author: "Stephanie Phoa"
+date: "7/28/2021"
+output:
+  pdf_document:
+    highlight: zenburn
+    toc: yes
+    toc_depth: 2
+    number_sections: true
+  html_document:
+    theme: flatly
+  word_document:
+    toc: yes
+    toc_depth: '2'
+---
+
+\newpage
+
+```{r Global_Options, include = FALSE}
+knitr::opts_chunk$set(message=FALSE, 
+                      warning=FALSE, 
+                      error=FALSE)
+
+```
+
+\newpage
+
+# Executive Summary
+
+As a subject dedicated to the science and analysis of big data, Data Science has become an increasingly important research tool within the Social Sciences (Harlow & Oswald, 2016). Since 2018, The Society of Industrial-Organizational Psychology (SIOP) has conducted machine learning competitions to help introduce data science into its community (Putka, Schwall & Taylor, 2018). The competitions are usually based around Psychology themes and encounters. For this project, I have opted to use the problem defined and dataset provided during the 2019 SIOP machine learning competition. The competition calls for a text analysis of a set of 5 open ended situational judgement questions in order to predict the Big Five personality traits of each participant in the dataset (Thompson, Koenig & Lui, 2019).\
+
+The competition has provided a dataset of 5 open ended situational judgement questions around the workplace that attempts to elicit Big Five personality trait relevant behaviours. The Big Five is a theory of personality traits commonly used categorization of personalities within the psychological sphere (Goldberg, 1993). The personality traits include Extroversion, Agreeableness, Openness to Experience, Conscientiousness, Neuroticism and are treated . A quick analysis on the open-ended questions provided showed that it included several topics, one on travel and vacation, workload, social activity, confrontation and new experiences (SIOP Team, 2019). In the full data description listed with the competition details, it is made clear that the questions are supposed to elicit a specific personality trait (Thompson, Koenig & Lui, 2019).\
+
+According to the competition details, the participant personality traits is a rating from 1 to 5, and was aggregated from their responses on the Big Five personality inventory (SIOP Team, 2019). The dataset involved 1688 participants and was split into three sets, a Train set (n=1088), Dev set (n=300) and Test set (n=300) (Thompson, Koenig & Lui, 2019). To avoid overfitting, we will be using the Train set to predict the Dev set and select our initial models, which will then be used on the Test set for our final score. The evaluation metric for this project will follow the Competition's, that is the average (mean) of the correlation between the training set and the test data (Thompson, Koenig & Lui, 2019). For this project, I will be using Natural Language Processing methodology to tokenize and clean the initial data, then run it through three algorithms: a Random Forest model (Rborist), an Electric Net, Lasso or Ridge regression model (glmnet) and an Extreme Gradient Boosting model (xgboost). I also ran the data through a Sentiment Analysis (sentimentr), which analyses the positivity or negativity of the open-ended responses. In testing, I also have tried analysing the readability, number of words, number of errors and profanity but did not include these because very little correlation was found between the predictions.
+
+\newpage
+
+# Methodology
+
+```{r, echo=FALSE, cache = TRUE}
+
+if(!require(tidyverse)) install.packages("tidyverse", repos = "http://cran.us.r-project.org")
+if(!require(caret)) install.packages("caret", repos = "http://cran.us.r-project.org")
+if(!require(MASS)) install.packages("MASS", repos = "http://cran.us.r-project.org")
+if(!require(tibble)) install.packages("tibble", repos = "http://cran.us.r-project.org")
+if(!require(data.table)) install.packages("data.table", repos = "http://cran.us.r-project.org")
+if(!require(dplyr)) install.packages("dplyr", repos = "http://cran.us.r-project.org")
+if(!require(dslabs)) install.packages("dslabs", repos = "http://cran.us.r-project.org")
+if(!require(quanteda)) install.packages("quanteda", repos = "http://cran.us.r-project.org")
+if(!require(text2vec)) install.packages("text2vec", repos = "http://cran.us.r-project.org")
+if(!require(stringr)) install.packages("stringr", repos = "http://cran.us.r-project.org")
+if(!require(tidytext)) install.packages("tidytext", repos = "http://cran.us.r-project.org")
+if(!require(quanteda.textplots)) install.packages("quanteda.textplots", repos = "http://cran.us.r-project.org")
+if(!require(wordcloud)) install.packages("wordcloud", repos = "http://cran.us.r-project.org")
+if(!require(tm)) install.packages("tm", repos = "http://cran.us.r-project.org")
+if(!require(randomForest)) install.packages("randomForest", repos = "http://cran.us.r-project.org")
+if(!require(Rborist)) install.packages("Rborist", repos = "http://cran.us.r-project.org")
+if(!require(e1071)) install.packages("e1071", repos = "http://cran.us.r-project.org")
+if(!require(glmnet)) install.packages("glmnet", repos = "http://cran.us.r-project.org")
+if(!require(xgboost)) install.packages("xgboost", repos = "http://cran.us.r-project.org")
+if(!require(quanteda.textstats)) install.packages("quanteda.textstats", repos = "http://cran.us.r-project.org")
+if(!require(sentimentr)) install.packages("sentimentr", repos = "http://cran.us.r-project.org")
+if(!require(knitr)) install.packages("knitr", repos = "http://cran.us.r-project.org")
+if(!require(tinytex)) install.packages("tinytex", repos = "http://cran.us.r-project.org")
+
+```
+
+We start by downloading and installing the required packages for this project.
+
+```{r, message=FALSE, warning=FALSE, error=FALSE, cache=TRUE}
+library(tidyverse)
+library(caret)
+library(MASS)
+library(tibble)
+library(data.table)
+library(dslabs)
+library(dplyr)
+library(quanteda)
+library(text2vec)
+library(stringr)
+library(tidytext)
+library(quanteda.textplots)
+library(wordcloud)
+library(tm)
+library(randomForest)
+library(Rborist)
+library(e1071)
+library(xgboost)
+library(quanteda.textstats)
+library(sentimentr)
+library(knitr)
+library(tinytex)
+
+```
+
+\newpage
+
+## Preprocessing
+
+Firstly, the full dataset was downloaded from the competition website (SIOP, 2019). Because the data provided was in a raw text data form, some pre-processing was required to get our models up and ready for training. As shown, the data given was split into five-character columns which will be our predictors, and five more columns as our dependent variables. The dependent variables are continuous variables each consisting of a rating score between 1-5 for each trait. Finally, we used the "Dataset" column as a guidance on how to split the full dataset between Train, Dev and Test.
+
+```{r, message=FALSE, warning=FALSE, error=FALSE, cache=TRUE}
+
+
+dl <- tempfile()
+download.file("https://raw.githubusercontent.com/steph-phoa/Capstone/main/Choose%20Your%20Own%20-%20NLP/siop_data_2019.csv", dl)
+
+siop <- read.csv(dl, stringsAsFactors=F)
+
+# If the download link doesn't work, please find the source file over at my github 
+# https://github.com/steph-phoa/Capstone/
+# siop <- read.csv("siop_data_2019.csv", stringsAsFactors=F) 
+
+train <- siop %>% filter(Dataset=="Train")
+test <- siop %>% filter(Dataset=="Test")
+dev <- siop %>% filter(Dataset=="Dev")
+
+names(siop)
+
+```
+
+We start our preprocessing by cleaning up the unstructured text data. For this, we used the package "quanteda" to convert the text for each question into a Document Term Matrix (DTM). A Document Term Matrix is a matrix that defines the frequency of words used in the raw data. We tokenized each question separately, removing any symbols, punctuation, numbers and URLs in this matter, and then compressed all questions into one DTM. This was done initially for the Test and Dev sets.
+
+```{r, message=FALSE, warning=FALSE, error=FALSE, cache = TRUE}
+
+
+t_all  <- lapply(c(2:6), function(x){
+    t <- tokens(train[,x] ,
+           remove_punct = T,
+           remove_symbols = T,
+           remove_numbers = T,
+           remove_url = T ) %>%
+        tokens_ngrams(., n=1:3) %>%
+        dfm(.)
+} )
+
+# remove single occurrences and near zero variances
+ 
+t_all <- sapply(t_all, function(x) {dfm_trim(x, min_docfreq=2)})
+t_all_tfidf <-sapply(t_all, function(x) {dfm_tfidf(x)}) 
+nzv_all <- sapply(t_all_tfidf, function(x) {nearZeroVar(x)})
+t_all_final <- sapply(1:5, function(x) {t_all[[x]][,-nzv_all[[x]]]})
+
+dtm_all <- do.call(cbind, t_all_final) %>% dfm_compress
+
+```
+
+```{r, message=FALSE, warning=FALSE, error=FALSE, include=FALSE, cache = TRUE}
+
+# Code hidden for the sake of brevity 
+# Same thing as above but for the dev set 
+
+t_all_dev  <- lapply(c(2:6), function(x){
+    t <- tokens(dev[,x] ,
+                remove_punct = T,
+                remove_symbols = T,
+                remove_numbers = T,
+                remove_url = T ) %>%
+        tokens_ngrams(., n=1:3) %>%
+        dfm(.)
+} )
+
+
+t_all_dev <- sapply(t_all_dev, function(x) {dfm_trim(x, min_docfreq=2)})
+t_all_tfidf_dev <-sapply(t_all_dev, function(x) {dfm_tfidf(x)}) 
+nzv_all_dev <- sapply(t_all_tfidf_dev, function(x) {nearZeroVar(x)})
+t_all_final_dev <- sapply(1:5, function(x) {t_all_dev[[x]][,-nzv_all_dev[[x]]]})
+
+dtm_all_dev <- do.call(cbind, t_all_final_dev) %>% dfm_compress
+
+```
+
+\newpage
+
+For the final pre-processing step, we removed any single occurrences and near zero variables in an attempt to reduce skewing of the data. The clean train and dev data were combined separately with each personality score, and then only the overlapping features were kept.
+
+```{r, message=FALSE, warning=FALSE, error=FALSE, cache = TRUE}
+
+# Only Keep overlapping features
+t_keep <- convert(dtm_all,to="data.frame")
+t_keep <- t_keep[,-1]
+
+dev_keep <- convert(dtm_all_dev,to="data.frame")
+dev_keep <- dev_keep[,-1]
+
+# select overlapping features
+keep_features <- intersect(colnames(t_keep), colnames(dev_keep))
+
+# remove features that dont exist in each other
+t_clean <- t_keep [ , keep_features , drop=FALSE] 
+dev_clean <- dev_keep [ , keep_features ,drop=FALSE] 
+
+```
+
+Here is a little preview of our cleaned up train and dev dtms:
+
+```{r, message=FALSE, warning=FALSE, error=FALSE}
+
+# Clean train dtm
+head(t_clean[,1:5])
+
+```
+
+```{r, message=FALSE, warning=FALSE, error=FALSE}
+
+# Clean dev dtm
+head(dev_clean[,1:5])
+```
+
+\
+Just to be sure, we double check if both set dtms contain only the exact same columns / features.
+
+```{r, message=FALSE, warning=FALSE, error=FALSE}
+
+identical(ncol(t_clean), ncol(dev_clean))
+
+identical(colnames(t_clean),colnames(dev_clean))
+
+```
+
+\newpage
+
+## Random Forest (Rborist)
+
+Our first attempt at training the model is by using a Random Forest model from the Rborist package. We applied this algorithm using caret's train function with default tuning for our initial attempt. The model was trained for each personality trait individually.
+
+```{r, message=FALSE, warning=FALSE, error=FALSE , cache = TRUE}
+
+# Writing a function to train, predict and evaluate an Rborist training model (4 hours)
+
+rf_train <- function(x) { 
+  s <- paste0(x, "_Scale_score")
+  
+  trainx <- cbind(t_clean, score=train[,s])
+  devx <- cbind(dev_clean, score=dev[,s])
+  
+  suppressWarnings(set.seed(1, sample.kind="Rounding"))
+  model <- train(score ~., data= trainx,  method="Rborist", ntree=500) 
+  
+  yhat <- predict(model, devx)
+  
+  cor(yhat, devx$score)
+}
+
+traits <- c("E","A","O","C","N")
+
+rf_results <- sapply(traits, rf_train)
+```
+
+
+\
+Here are the Random Forest results for each personality trait.
+
+```{r, message=FALSE, warning=FALSE, error=FALSE, cache = TRUE}
+
+rf_results <- as.data.frame(rf_results)
+
+colnames(rf_results) <- c("E","A","O","C","N")
+
+rf_results
+
+```
+
+\newpage
+
+## Elastic Net (glmnet)
+
+To train a regression model, we picked the glmnet package as it allowed us control over our regularization parameter, alpha. We first tuned the model using the cv.glmnet function from the glmnet package, then forwarded the best functioning alpha and lambda values on a glmnet training model. To tune and train each prediction value easily, we used mapply to apply three lists consisting of the train sets for each trait and its dev set counterpart.
+
+\
+Writing the glmnet function with alpha tuning using cv.glmnet
+
+```{r, message=FALSE, warning=FALSE, error=FALSE, cache = TRUE}
+
+library(glmnet)
+
+glmnet_function <- function(x){
+  
+  s <- paste0(x, "_Scale_score")
+  
+  trainx <- cbind(t_clean, score=train[,s])
+  devx <- cbind(dev_clean, score=dev[,s])
+  
+  # tuning the alpha value using cross validation
+  l <- sapply( seq(0.1,1,0.1) , function(y){
+    
+    suppressWarnings(set.seed(1,sample.kind="Rounding"))
+    cv <- cv.glmnet(data.matrix(t_clean), data.matrix(trainx$score), type.measure="mse", 
+                    alpha=y ,family="gaussian")
+    
+    cv$lambda.1se
+    
+  })
+  
+  a <- which.min(l)/10
+  
+  suppressWarnings(set.seed(1,sample.kind="Rounding"))
+  fit <- glmnet(data.matrix(t_clean), data.matrix(trainx$score), alpha=a )
+  
+  yhat <- predict(fit, newx=data.matrix(dev_clean), s=fit$lambda.1se )
+  
+  h <- cor(yhat, devx$score) 
+  print(c(a, h[which.max(h)])) }
+
+
+glmnet_results <- sapply(traits, glmnet_function)
+
+```
+
+
+
+The values were then predicted using the predict function from caret, and then the correlation values were extracted and combined in a dataframe.
+
+```{r, message=FALSE, warning=FALSE, error=FALSE, cache = TRUE}
+
+glmnet_results <- as.data.frame(glmnet_results)
+
+colnames(glmnet_results) <- c("E","A","O","C","N")
+rownames(glmnet_results) <- c("alpha","correlation")
+
+glmnet_results
+
+```
+
+\newpage
+
+## Extreme Gradient Boosting (xgboost)
+
+XGBoost is a popular Extreme Gradient Boosting algorithm used in many competitions because of it's parallel processing capability which allows for much faster training of models because it uses multiple cores in the processor simultaneously to do so. The package we use for R in this project is called xgboost. Although the training of the xgboost model is relatively fast, we had to tune multiple parameters in caret, which takes the brunt of the time spent on this algorithm. The parameters used were booster, objective, size shrinking (eta), max depth of tree, minimum loss reduction (gamma), minimum weight of each child partition, subsampling by columns, and the subsampling of full data.
+
+The tuning parameters were expended into a matrix which contains every combination of tuning values required, therefore, tuning the full range of values will take an unreasonable amount of time (upwards of 3+ days last I tried), so the value range used in this tuning have been downsized according to previous tuning attempts. The dataset for each personality trait was tuned and then subsequently trained individually to get our final correlation values.
+
+### Tuning xgboost
+
+Tuning each parameter using caret::train()
+
+```{r, error=FALSE, message=FALSE, warning=FALSE, cache = TRUE}
+
+library(xgboost)
+
+#### Determining tuning variables
+
+xgb_tune <- function(x){
+  
+  s <- paste0(x, "_Scale_score")
+  
+  trainx <- cbind(t_clean, score=train[,s])
+  devx <- cbind(dev_clean, score=test[,s])
+  
+  t_data <- train_clean %>% data.matrix
+  t_label <- trainx$score %>% data.matrix
+  dev_data <- dev_clean %>% data.matrix
+  dev_label <- devx$score %>% data.matrix
+  
+  xgb_train <- xgb.DMatrix(data=t_data,label=t_label)
+  xgb_dev <- xgb.DMatrix(data=dev_data,label=dev_label)
+  
+  
+  ### tuning params 
+  
+  
+  # train control parameters
+  xgb_trcontrol <- trainControl(
+    method = "cv",
+    number = 3,
+    allowParallel = TRUE,
+    verboseIter = FALSE,
+    returnData = FALSE
+  )
+  
+  
+  # ggplot function for showing tuning graph
+  tuneplot <- function(x, probs = .90) {
+    ggplot(x) +
+      coord_cartesian(ylim = c(quantile(x$results$RMSE, probs = probs), min(x$results$RMSE))) +
+      theme_bw()
+  }
+  
+  
+  # tuning max depth, eta, 
+  
+  xgb_grid_1 <- expand.grid(
+    nrounds = seq(50, 150, 10),
+    eta= c(0.025, 0.05, 0.1, 0.3),
+    max_depth=seq(2,6,1),
+    gamma = 0 ,
+    colsample_bytree = 1,
+    min_child_weight=1,
+    subsample= 0.5
+  )
+  
+  suppressWarnings(set.seed(1,sample.kind="Rounding"))
+  xgb_tune_1 <- train( score ~.,
+                       data= data.matrix(trainx)  ,
+                       trControl = xgb_trcontrol ,
+                       tuneGrid = xgb_grid_1,
+                       objective="reg:squarederror",
+                       method = "xgbTree")
+
+  tuneplot(xgb_tune_1)
+  xgb_tune_1$bestTune
+
+  # tuning min child weight
+
+
+  xgb_grid_2 <- expand.grid(
+    nrounds = seq(50, 150, 10),
+    eta= xgb_tune_1$bestTune$eta,
+    max_depth=seq(2,4,1),
+    gamma = 0 ,
+    colsample_bytree = 1,
+    min_child_weight=seq(1,3,1),
+    subsample= 0.5
+  )
+
+
+  suppressWarnings(set.seed(1,sample.kind="Rounding"))
+  xgb_tune_2 <- train( score ~.,data= data.matrix(trainx),
+                     trControl = xgb_trcontrol ,
+                     tuneGrid = xgb_grid_2,
+                     objective="reg:squarederror",
+                     method = "xgbTree")
+
+  tuneplot(xgb_tune_2)
+  xgb_tune_2$bestTune
+
+  # tuning column and row sampling
+
+
+  xgb_grid_3 <- expand.grid(
+    nrounds = seq(200, 1000, 50),
+    eta= xgb_tune_1$bestTune$eta, 
+    max_depth=xgb_tune_2$bestTune$max_depth, 
+    gamma = 0 ,
+    colsample_bytree = seq(0.4, 1, 0.2),
+    min_child_weight=xgb_tune_2$bestTune$min_child_weight,
+    subsample= c(0.35, 0.5, 0.75)
+  )
+
+
+
+
+  suppressWarnings(set.seed(1,sample.kind="Rounding"))
+  xgb_tune_3 <- train(score ~., data= data.matrix(trainx) ,
+                     trControl = xgb_trcontrol ,
+                     tuneGrid = xgb_grid_3,
+                     objective="reg:squarederror",
+                     method = "xgbTree")
+
+  tuneplot(xgb_tune_3, probs = .95)
+  xgb_tune_3$bestTune
+
+
+  # tuning gamma
+
+  xgb_grid_4 <- expand.grid(
+    nrounds = seq(100, 350, 50),
+    eta= xgb_tune_1$bestTune$eta, #0.05
+    max_depth=xgb_tune_2$bestTune$max_depth, #3
+    gamma = c(0, 1, 3, 5, 7 , 10) , 
+    colsample_bytree = xgb_tune_3$bestTune$colsample_bytree, # 0.8
+    min_child_weight=xgb_tune_2$bestTune$min_child_weight, # 3
+    subsample = xgb_tune_3$bestTune$subsample #0.5
+  )
+
+  suppressWarnings(set.seed(1,sample.kind="Rounding"))
+  xgb_tune_4 <- train(score ~., data= data.matrix(trainx) ,
+                     trControl = xgb_trcontrol ,
+                     tuneGrid = xgb_grid_4,
+                     objective="reg:squarederror",
+                     method = "xgbTree")
+
+  tuneplot(xgb_tune_4, probs = .95)
+  xgb_tune_4$bestTune
+
+# reducing the learning rate (eta)
+  
+  xgb_grid_5 <- expand.grid(
+    nrounds = seq(100, 350, 50),
+    eta= c(0.01, 0.015, 0.025, 0.05, 0.1), #0.05
+    max_depth=xgb_tune_2$bestTune$max_depth, #3
+    gamma = xgb_tune_4$bestTune$gamma , 
+    colsample_bytree = xgb_tune_3$bestTune$colsample_bytree, # 0.8
+    min_child_weight=xgb_tune_2$bestTune$min_child_weight, # 3
+    subsample = xgb_tune_3$bestTune$subsample #0.5
+  )
+
+  suppressWarnings(set.seed(1,sample.kind="Rounding"))
+  xgb_tune_5 <- train(score ~., data= data.matrix(trainx) ,
+                     trControl = xgb_trcontrol ,
+                     tuneGrid = xgb_grid_5,
+                     objective="reg:squarederror",
+                     method = "xgbTree")
+
+  tuneplot(xgb_tune_5, probs = .95)
+  xgb_tune_5$bestTune
+
+}
+
+# Using sapply to tune all traits at once
+
+xgb_bestTune <- sapply(traits, xgb_tune)
+
+```
+
+
+\
+\
+\
+Here is our tuning parameters for each personality trait:
+
+```{r, message=FALSE, warning=FALSE, error=FALSE, cache = TRUE}
+
+colnames(xgb_bestTune) <- traits
+
+xgb_bestTune
+
+```
+
+\newpage
+
+### Training xgboost
+
+Using the tuning parameters to train our xgboost model, which we wrote in a repeatable function
+
+```{r, message=FALSE, warning=FALSE, error=FALSE, cache = TRUE}
+
+xgb_train <- function(x ,k){
+  
+  s <- paste0(x, "_Scale_score")
+  
+  trainx <- cbind(t_clean, score=train[,s])
+  devx <- cbind(dev_clean, score=test[,s])
+  
+  t_data <- train_clean %>% data.matrix
+  t_label <- trainx$score %>% data.matrix
+  dev_data <- dev_clean %>% data.matrix
+  dev_label <- devx$score %>% data.matrix
+  
+  xgb_train <- xgb.DMatrix(data=t_data,label=t_label)
+  xgb_dev <- xgb.DMatrix(data=dev_data,label=dev_label)
+   
+  bt <- xgb_bestTune[,k]
+  
+  params <- list(
+    booster="gbtree",
+    objective="reg:squarederror",
+    eta= bt[3],
+    max_depth = bt[2],
+    gamma= bt[4] ,
+    colsample_bytree = bt[5],
+    min_child_weight= bt[6],
+    subsample= bt[7])
+  
+  # tuning max depth, eta, 
+  
+  xgb_model <- xgb.train(params = params,
+                         data = xgb_train, 
+                         watchlist = list(
+                           train = xgb_train,
+                           dev = xgb_dev ),
+                         nrounds=300,
+                         early_stopping_rounds = 50)
+  
+  
+  xgb_p <- predict(xgb_model, newdata=xgb_dev)
+  
+  cor(xgb_p, dev_label)}
+
+suppressWarnings(set.seed(1,sample.kind="Rounding"))
+xgb_final <-  mapply(xgb_train, x=traits, k=seq(1,5,1))
+ 
+```
+
+These are the correlations for the xgboost model on each personality trait:
+
+```{r, message=FALSE, warning=FALSE, error=FALSE, cache = TRUE}
+
+xgb_results <- as.data.frame(xgb_final) %>% t
+colnames(xgb_results) <- traits
+
+xgb_results
+
+```
+
+\newpage
+
+## Sentiment Analysis
+
+Sentiment analysis is a common Natural Language Processing model typically used to analyse customer reviews. It is used to determined if the text review leans positively or negatively according to the words used. For this project, a Sentiment analysis is applied using the package sentimentr and a random forest model is used to predict our dependent value.
+
+```{r, message=FALSE, warning=FALSE, error=FALSE, cache = TRUE}
+
+tscore_list <- list(train$E_Scale_score, train$A_Scale_score, train$O_Scale_score, train$C_Scale_score, train$N_Scale_score)
+
+dscore_list <-  list(dev$E_Scale_score, dev$A_Scale_score, dev$O_Scale_score, dev$C_Scale_score, dev$N_Scale_score)
+
+senti <- apply(train[,2:6],2,function(x){sentiment_by(x)$ave_sentiment})
+
+senti_dev <- apply(dev[,2:6],2,function(x){sentiment_by(x)$ave_sentiment})
+
+```
+
+The sentimentr package allows you to perform a Sentiment Analysis by coding raw character text into a positive or negative sentiment effect according to the words or phrases used. Here's a peek into how a sentiment analysis coding looks like.
+
+```{r, message=FALSE, warning=FALSE, error=FALSE, cache = TRUE}
+head(senti)
+```
+
+Now that the character text have been converted into scaled features, we can now use Random Forest to see if the sentiment of the responses could be used to determine personality.
+
+```{r, message=FALSE, warning=FALSE, error=FALSE, cache = TRUE}
+
+senti_func <- function(i,j){
+
+  senti <- data.frame(cbind(senti, Score=i))
+  senti_dev <- data.frame(cbind(senti_dev, Score=j))
+  
+  senti_model <- train(Score~., data=senti, method="Rborist")
+  senti_pred <- predict(senti_model, senti_dev)
+
+  cor(senti_pred, j)
+
+}
+
+senti_cor <- mapply(senti_func, i=tscore_list, j=dscore_list)
+
+sentiment_results <- data.frame(senti_cor) %>% t
+
+colnames(sentiment_results) <- traits
+
+```
+
+```{r, message=FALSE, warning=FALSE, error=FALSE,  cache = TRUE}
+
+sentiment_results
+
+```
+
+\
+
+The correlation values from all models and traits are then combined into an ensemble datafrane so we may review and compare the efficacy of each model. We then select the top model for each trait in for our final Test set modeling. For our final evaluation number, we have to mean the correlation coefficient for each trait, resulting in an average correlation number of 0.245.
+
+```{r, message=FALSE, warning=FALSE, error=FALSE, cache = TRUE}
+
+ensemble <- rbind (sentiment=sentiment_results, randomforest=rf_results, glmnet=glmnet_results[2,], xgboost=xgb_results)
+
+ensemble
+
+best_models <- sapply(c("E", "A", "O", "C","N"), function(x){
+  rownames(ensemble[ensemble[,x]==max(ensemble[,x]),])
+  })
+
+best_models
+
+avg_cor_pre <- apply(ensemble, 2, max) %>% mean
+
+avg_cor_pre
+
+```
+
+\newpage
+
+# Results
+
+On our initial modelling between our Train and Dev sets, we can see that each personality trait has different corresponding models as determined by the correlation values between the predicted values and 'true' values on the Dev set. For Extroversion, the best model used is the glmnet algorithm with an alpha of 1 (lasso). For Agreeableness, it is the Random Forest model. The Openness to Experience trait has a stronger Sentiment Analysis prediction. Conscientiousness did better with Random Forest and XGBoost was our final model for Neuroticism.
+
+## Pre-processing
+
+To fit each model with our final Test set, we first had to do some pre-processing. We first combined the Train and Dev sets in order to get more data to fit the Test model.
+
+```{r, message=FALSE, warning=FALSE, error=FALSE}
+
+train_dev <- rbind(train, dev)
+```
+
+We then converted the text train_dev set into a Document Term Matrix with the same settings as initially. We removed any singular occurrences in the text and removed any words with near zero variances. Our Test set also received the same treatment. The cleaned dtms were labelled as train_final and test_final respectively.
+
+```{r, message=FALSE, warning=FALSE, error=FALSE, cache = TRUE}
+
+# Tokenize Train set
+
+train_final <- lapply(c(2:6), function(x){
+  t <- tokens(train_dev[,x] ,
+              remove_punct = T,
+              remove_symbols = T,
+              remove_numbers = T,
+              remove_url = T ) %>%
+    tokens_ngrams(., n=1:3) %>%
+    dfm(.)
+} )
+
+
+train_final <- sapply(train_final, function(x) {dfm_trim(x, min_docfreq=2)})
+train_final_tfidf <-sapply(train_final, function(x) {dfm_tfidf(x)}) 
+nzv2 <- sapply(train_final_tfidf, function(x) {nearZeroVar(x)})
+train_final <- sapply(1:5, function(x) {train_final[[x]][,-nzv2[[x]]]})
+
+train_final <- do.call(cbind, train_final) %>% dfm_compress
+
+```
+
+We then run the data for each trait in their respective best working models.
+
+```{r, message=FALSE, warning=FALSE, error=FALSE}
+
+print(best_models)
+```
+
+Start by preprocessing the new train_dev data...
+
+```{r, message=FALSE, warning=FALSE, error=FALSE, cache = TRUE}
+
+train_final <- lapply(c(2:6), function(x){
+  t <- tokens(train_dev[,x] ,
+              remove_punct = T,
+              remove_symbols = T,
+              remove_numbers = T,
+              remove_url = T ) %>%
+    tokens_ngrams(., n=1:3) %>%
+    dfm(.)
+} )
+
+
+train_final <- sapply(train_final, function(x) {dfm_trim(x, min_docfreq=2)})
+train_final_tfidf <-sapply(train_final, function(x) {dfm_tfidf(x)}) 
+nzv2 <- sapply(train_final_tfidf, function(x) {nearZeroVar(x)})
+train_final <- sapply(1:5, function(x) {train_final[[x]][,-nzv2[[x]]]})
+
+train_final <- do.call(cbind, train_final) %>% dfm_compress
+
+```
+
+...and the final test data respectively.
+
+```{r, message=FALSE, warning=FALSE, error=FALSE, cache = TRUE}
+
+# Tokenize Test set
+
+test_dtm <- lapply(c(2:6), function(x){
+  t <- tokens(test[,x] ,
+              remove_punct = T,
+              remove_symbols = T,
+              remove_numbers = T,
+              remove_url = T ) %>%
+    tokens_ngrams(., n=1:3) %>%
+    dfm(.)
+} )
+
+
+test_dtm <- sapply(test_dtm, function(x) {dfm_trim(x, min_docfreq=2)})
+test_tfidf <-sapply(test_dtm, function(x) {dfm_tfidf(x)}) 
+nzv_test <- sapply(test_tfidf, function(x) {nearZeroVar(x)})
+test_final <- sapply(1:5, function(x) {test_dtm[[x]][,-nzv_test[[x]]]})
+
+test_final <- do.call(cbind, test_dtm) %>% dfm_compress
+
+```
+
+Remember to remove the token features that are not in either the test_dev dtm or test dtms.
+
+```{r, message=FALSE, warning=FALSE, error=FALSE, cache = TRUE}
+
+# remove tokens that doesnt overlap in both sets
+train_clean <- convert(train_final,to="data.frame")
+train_clean <- train_clean[,-1]
+
+test_clean <- convert(test_final,to="data.frame")
+
+keeper <- intersect(colnames(train_clean), colnames(test_clean))
+train_clean <- train_clean [ , keeper , drop=FALSE]  #remove features that dont exist in dev
+test_clean <- test_clean [ , keeper ,drop=FALSE]  
+
+```
+
+```{r, message=FALSE, warning=FALSE, error=FALSE, echo=FALSE}
+
+# Heres some hidden code of the custom model training functions
+
+# Writing functions for easier use
+# rf tuning and training model 
+
+rf_test <- function(x) { 
+  s <- paste0(x, "_Scale_score")
+  
+  trainx <- cbind(train_clean, score=train_dev[,s])
+  testx <- cbind(test_clean, score=test[,s])
+  
+  model <- train( score ~., data= trainx,  method="Rborist", ntree=500) 
+  yhat <- predict(model, testx)
+  cor(yhat, testx$score)
+}
+
+# xgb tuning and training model
+
+xgb_tune_train <- function(x) {
+  
+  h <- paste0(x, "_Scale_score")
+  
+  set.seed(1,sample.kind="Rounding")
+  tune <- xgb_tune(cbind(train_clean, score=train_dev[,h]), 
+                   cbind(test_clean, score=test[,h]))
+  
+  trainx <- xgb.DMatrix(data=data.matrix(train_clean),
+                        label=data.matrix(train_dev[,h]))
+  testx <- xgb.DMatrix(data=data.matrix(test_clean),
+                       label=data.matrix(test[,h]))
+  
+  set.seed(1,sample.kind="Rounding")
+  model <- xgb.train(params = list(
+    booster="gbtree",
+    objective="reg:squarederror",
+    eta= tune[3],
+    max_depth = tune[2],
+    gamma= tune[4] ,
+    colsample_bytree = tune[5],
+    min_child_weight= tune[6],
+    subsample= tune[7]),
+    data = trainx, 
+    watchlist = list( 
+      train = trainx,
+      test = testx ),
+    nrounds=500,
+    early_stopping_rounds = 50)
+  
+  p <- predict(model, newdata=testx)
+  cor(p, test[,h])
+  
+}
+
+glmnet_test <- function(x){
+  
+  s <- paste0(x, "_Scale_score")
+  
+  trainx <- cbind(train_clean, score=train_dev[,s])
+  testx <- cbind(test_clean, score=test[,s])
+  
+  # tuning the alpha value using cross validation
+  l <- sapply( seq(0.1,1,0.1) , function(y){
+    
+    suppressWarnings(set.seed(1,sample.kind="Rounding"))
+    cv <- cv.glmnet(data.matrix(train_clean), data.matrix(trainx$score), type.measure="mse", alpha=y ,family="gaussian")
+    
+    cv$lambda.1se
+    
+  })
+  
+  a <- which.min(l)/10
+  
+  suppressWarnings(set.seed(1,sample.kind="Rounding"))
+  fit <- glmnet(data.matrix(train_clean), data.matrix(trainx$score), alpha=a )
+  
+  yhat <- predict(fit, newx=data.matrix(test_clean), s=fit$lambda.1se )
+  
+  h <- cor(yhat, testx$score) 
+  print(c(a, h[which.max(h)]))}
+
+```
+
+\newpage
+
+## Final Model Training
+
+### Extroversion
+
+```{r, message=FALSE, warning=FALSE, error=FALSE, cache = TRUE}
+
+# Training Extroversion with glmnet
+
+E_final <-glmnet_test(x="E")
+
+# alpha
+E_final[1]
+
+# correlation
+E_final[2]
+
+```
+
+### Agreeableness
+
+```{r, message=FALSE, warning=FALSE, error=FALSE, cache = TRUE}
+
+# Training Agreeableness with Rborist
+
+A_final <- rf_test(x="A")
+
+A_final
+
+```
+
+### Openness to Experience
+
+
+```{r, message=FALSE, warning=FALSE, error=FALSE, cache = TRUE}
+
+# Training Openness to Experience with Sentimentr
+
+senti_td <- apply(train_dev[2:6],2,function(x){sentiment_by(x)$ave_sentiment})
+senti_td <- data.frame(cbind(senti_td,  O=train_dev$O_Scale_score))
+
+senti_test <- apply(test[2:6],2,function(x){sentiment_by(x)$ave_sentiment})
+senti_test <- data.frame(cbind(senti_test,  O=test[,"O_Scale_score"]))
+
+set.seed(1, sample.kind="Rounding")
+senti_model <- train(O ~., data=senti_td, method="Rborist", ntree=500)
+senti_pred <- predict(senti_model, senti_test)
+
+O_final <- cor(senti_pred, senti_test)
+
+```
+
+### Concientiousness
+
+```{r, message=FALSE, warning=FALSE, error=FALSE, cache = TRUE}
+
+# Training Concientiousness wtih Rborist
+
+C_final <- rf_test(x="C")
+
+```
+
+### Neuroticism
+
+```{r, message=FALSE, warning=FALSE, error=FALSE, cache = TRUE}
+
+# Training Neuroticism with xgboost
+
+N_final <- xgb_tune_train(x="N")
+
+```
+
+
+## Final Correlations
+
+```{r, message=FALSE, warning=FALSE, error=FALSE}
+
+final_cors <- data.frame( Extraversion = E_final[2],
+                          Agreeableness = A_final,
+                          Openness_to_Experience = O_final,
+                          Conscientiousness = C_final,
+                          Neuroticism = N_final)
+
+final_cors
+```
+
+The final correlation data of each trait was then averaged between them to receive a final average correlation score of 0.183.
+
+```{r, message=FALSE, warning=FALSE, error=FALSE}
+
+avg_cor <- rowMeans(final_cors)
+
+avg_cor
+
+```
+
+\newpage
+
+# Discussion
+
+The first thing that was noticed within the final results was that most of our models had a weaker correlation on the Test set as compared to the Dev set. A possibility of this outcome was that this was the result of the Test set having a low sample size of n=300, or perhaps the data in the Test set was skewed, providing a weaker outcome. Alternatively, another explanation could be that there is simply a low correlation between words used and personality. Although certain words may correlate more with certain personality types, it is sometimes important for us to understand the context behind the language which is difficult to replicate within an algorithm.
+
+To compare our results, we examine the winners and leaderboard of the original competition. The competition was held in 2019 and resulted in 31 submissions on the final test phase (SIOP, 2019). The winner of the competition, a group called Natural Selection, was able to produce an average test correlation of 0.26, followed by the runner ups, Team Procrustination (0.25), Logistic Aggression (0.23) and PI-RATES (0.23) (Thompson, Koening & Lui, 2019). Our initial average correlation score on the Dev set would actually score pretty well on the Public Leaderboards, which was the result the teams' average correlation score on the Dev set as well. However, it seems there is a crucial component we were missing that made us miss the mark on the final testing. A look at the results show that some models did very poorly on the test set, but did excellent when trained on the Dev set. The Sentiment Analysis was one such model, giving us a 0.23 correlation score for "Openness to Experience", but a much lower correlation on the test set, with a score of 0.10. An insight through Natural Selection's winning presentation shows that apart from machine learning techniques, they have also utilized Deep Learning models and feature selection by manually constructing word lists for each trait (Natural Selection, 2019).
+
+Lastly we would like to note that through our experimentation stage, we noted that there are strong correlations between specific traits and individual questions. We ran a generalized linear model algorithm on each question with all traits and found very strong prediction correlations for every question to at least one trait. This matches our initial expectation where we hypothesized that each of the situational judgement questions would elicit a strong relationship in at least one of the Big Five personality traits. Therefore, this begs the question whether there was a hidden objective within the competition where participants were expected to find specific subtleties within the written language that may point towards a specific personality trait.
+
+```{r, message=FALSE, warning=FALSE, error=FALSE, cache = TRUE}
+
+# Separating the Open Ended Questions from Train and Dev Set into 5 separate trainable sets
+  
+q1 <- t_all_final[[1]]
+q2 <- t_all_final[[2]]
+q3 <- t_all_final[[3]]
+q4 <- t_all_final[[4]]
+q5 <- t_all_final[[5]]
+
+dev_q1 <- t_all_final_dev[[1]]
+dev_q2 <- t_all_final_dev[[2]]
+dev_q3 <- t_all_final_dev[[3]]
+dev_q4 <- t_all_final_dev[[4]]
+dev_q5 <- t_all_final_dev[[5]] 
+
+# Run a linear model on each question, for each personality trait
+
+lm_function <- function(x,y) {
+  
+  x <- x
+  y <- y
+  
+  sapply(c("E","A","O","C","N"), function(a){
+  
+    b <- paste0(x, "_Scale_score")
+  
+    train_lm <- cbind(x, s = train[,b])
+    dev_lm <- cbind(y, s = dev[,b])
+  
+     model <- lm( s ~ . , data=x)
+     yhat <- predict(model, dev_lm)
+     cor(yhat, dev_lm$s)
+  })
+}
+
+lm_cors <- mapply(lm_function, 
+                  x=list(q1,q2,q3,q4,q5), 
+                  y=list(dev_q1,dev_q2,dev_q3,dev_q4,dev_q5))
+
+
+print(lm_cors)
+
+```
+
+\newpage
+
+# Limitations
+
+This machine learning project is based on the premise and data of the Society of Industrial-Organizational Science (SIOP) Machine Learning Competition 2019. The competition was held from January to April 2019, and at least 33 groups of participants from all expertise took part; this number determined by the amount of submissions listed on the private leaderboard (SIOP, 2019). In contrast, this project was coded and written by a single student of Data Science, whom has just figured out the basics of Machine Learning as instructed by this course. Although I get by, manpower is no doubt important not only for brainstorming and problem solving, but also for writing and testing dozens of code and algorithms as the winners of this competition all attest to. Like what Natural Selection (2019) noted in their winner's presentation: "You're not smart enough to do this yourself. Even if you are, you don't have the time."
+
+The second limitation of this project is technologically based. While these teams of data scientists with various qualifications and positions may have access to workstations or dedicated servers to process many algorithms, I have but my humble home desktop to work on. Testing and processing models take time that could be alleviated by a better desktop or dedicated server; the code provided within this project would already take at least a dozen hours on my computer to process, not counting the time taken for the models and code that did not make the final cut. Parallel processing training models such as provided by the xgboost and glmnet packages does make things run faster, at the cost of potentially crashing my pc through memory overload. Furthermore, two of the top four winners had written their code in Python, which is known to be faster and more efficient in processing and training machine learning algorithms.
+
+\newpage
+
+# Conclusion
+
+For my second project under edX's Data Science: Capstone course, I have opted to train a Natural Language Processing (NLP) dataset based on the Society of Industrial Organizational Psychology's 2019 Machine Learning Competition. The competition called for the prediction of the rating of five individual Big Five personality traits based on five open-ended text responses of five Situational Judgement test questions. The dataset provided by SIOP was split into Train, Dev and Test sets, where the initial model training was done on the Train and Dev sets, while the Test set was left for the final modeling in order to prevent overfitting. To pre-processes the raw dataset, I tokenized each response and converted and combined it into a single Document Term Matrix (DTM). The DTM was then trained within three different algorithms: Random Forest, Elastic Net Regression and Extreme Gradient Boosting. I also use Sentiment Analysis to process the data as an alternative. The correlation of each model prediction and the Dev set data was recorded and compared, and the best models were used to train the Test set. The best working models and their final correlations are as follows:
+
+```{r, message=FALSE, warning=FALSE, error=FALSE}
+
+
+final_scores <- data.frame(Personality = c("Extroversion",
+                                   "Agreeableness",
+                                   "Openness to Experience",
+                                   "Conscientiousness",
+                                   "Neuroticism"),
+Best_Model = c(best_models[1], best_models[2], best_models[3], best_models[4], best_models[5]), 
+Final_Correlation = c(E_final[2], A_final, O_final, C_final, N_final) )
+
+final_scores
+
+```
+
+Finally in accordance to the competition rules, we averaged our final evaluation of all personality traits in order to receive the average correlation score:
+
+```{r, message=FALSE, warning=FALSE, error=FALSE}
+
+print(avg_cor)
+```
+
+ 
+
+\newpage
+
+# References
+
+Goldberg, L. R. (1993). The structure of phenotypic personality traits. *American Psychologist, 48*(1), 26--34. [\<https://doi.org/10.1037/0003-066X.48.1.26\>](https://doi.apa.org/doi/10.1037/0003-066X.48.1.26)
+
+Harlow, L. L., & Oswald, F. L. (2016). Big data in psychology: Introduction to the special issue. *Psychological Methods, 21*(4), 447--457. [\<https://doi.org/10.1037/met0000120\>](https://psycnet.apa.org/doi/10.1037/met0000120)
+
+Natural Selection (2019). *The 2019 SIOP Machine Learning Competition.* Presented at the 34th annual Society for Industrial and Organizational Psychology conference in Austin, TX.
+
+Putka, D. J., Schwall, A., & Taylor, B. *The 2018 SIOP Machine Learning Competition.* Presented at the 33rd annual Society for Industrial and Organizational Psychology conference in Chicago, IL.
+
+SIOP Team (2019). *2019 SIOP Machine Learning Competition*. Hosted on <https://eval.ai/>
+
+Thompson, I., Koenig, N., & Lui, M. *The 2019 SIOP Machine Learning Competition.* Presented at the 34th annual Society for Industrial and Organizational Psychology conference in Austin, TX.
+
+\newpage
