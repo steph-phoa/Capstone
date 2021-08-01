@@ -168,7 +168,7 @@ rf_train <- function(x) {
   trainx <- cbind(t_clean, score=train[,s])
   devx <- cbind(dev_clean, score=test[,s])
   
-  surpressWarnings(set.seed(1, sample.kind="Rounding"))
+  suppressWarnings(set.seed(1, sample.kind="Rounding"))
   model <- train(score ~., data= trainx,  method="Rborist", ntree=500) 
   
   yhat <- predict(model, devx)
@@ -264,7 +264,7 @@ xgb_tune <- function(x){
   trainx <- cbind(t_clean, score=train[,s])
   devx <- cbind(dev_clean, score=test[,s])
   
-  t_data <- train_clean %>% data.matrix
+  t_data <- t_clean %>% data.matrix
   t_label <- trainx$score %>% data.matrix
   dev_data <- dev_clean %>% data.matrix
   dev_label <- devx$score %>% data.matrix
@@ -419,6 +419,7 @@ xgb_bestTune <- sapply(traits, xgb_tune)
 # saveRDS(xgb_bestTune, file="xgb_bestTune")
 # xgb_bestTune <- readRDS(file="xgb_bestTune")
 
+
 colnames(xgb_bestTune) <- traits
 
 xgb_bestTune 
@@ -432,7 +433,7 @@ xgb_train <- function(x ,k){
   trainx <- cbind(t_clean, score=train[,s])
   devx <- cbind(dev_clean, score=test[,s])
   
-  t_data <- train_clean %>% data.matrix
+  t_data <- t_clean %>% data.matrix
   t_label <- trainx$score %>% data.matrix
   dev_data <- dev_clean %>% data.matrix
   dev_label <- devx$score %>% data.matrix
@@ -465,9 +466,11 @@ xgb_train <- function(x ,k){
   
   xgb_p <- predict(xgb_model, newdata=xgb_dev)
   
-  cor(xgb_p, dev_label)
+  cor(xgb_p, dev[,s])
   
 }
+
+
 
 set.seed(1,sample.kind="Rounding")
 xgb_final <-  mapply(xgb_train, x=traits, k=seq(1,5,1))
@@ -609,13 +612,169 @@ rf_test <- function(x) {
 
 # xgb tuning and training model
 
+xgb_tune2 <- function(x){
+  
+  s <- paste0(x, "_Scale_score")
+  
+  trainx <- cbind(train_clean, score=train_dev[,s])
+  devx <- cbind(test_clean, score=test[,s])
+  
+  t_data <- train_clean %>% data.matrix
+  t_label <- trainx$score %>% data.matrix
+  dev_data <- dev_clean %>% data.matrix
+  dev_label <- devx$score %>% data.matrix
+  
+  xgb_train <- xgb.DMatrix(data=t_data,label=t_label)
+  xgb_dev <- xgb.DMatrix(data=dev_data,label=dev_label)
+  
+  
+  ### tuning params 
+  
+  
+  # train control parameters
+  xgb_trcontrol <- trainControl(
+    method = "cv",
+    number = 3,
+    allowParallel = TRUE,
+    verboseIter = FALSE,
+    returnData = FALSE
+  )
+  
+  
+  # ggplot function for showing tuning graph
+  tuneplot <- function(x, probs = .90) {
+    ggplot(x) +
+      coord_cartesian(ylim = c(quantile(x$results$RMSE, probs = probs), min(x$results$RMSE))) +
+      theme_bw()
+  }
+  
+  
+  # tuning max depth, eta, 
+  
+  xgb_grid_1 <- expand.grid(
+    nrounds = seq(50, 150, 10),
+    eta= c(0.025, 0.05, 0.1, 0.3),
+    max_depth=seq(2,6,1),
+    gamma = 0 ,
+    colsample_bytree = 1,
+    min_child_weight=1,
+    subsample= 0.5
+  )
+  
+  suppressWarnings(set.seed(1,sample.kind="Rounding"))
+  xgb_tune_1 <- train( score ~.,
+                       data= data.matrix(trainx)  ,
+                       trControl = xgb_trcontrol ,
+                       tuneGrid = xgb_grid_1,
+                       objective="reg:squarederror",
+                       method = "xgbTree")
+  
+  tuneplot(xgb_tune_1)
+  xgb_tune_1$bestTune
+  
+  # tuning min child weight
+  
+  
+  xgb_grid_2 <- expand.grid(
+    nrounds = seq(50, 150, 10),
+    eta= xgb_tune_1$bestTune$eta,
+    max_depth=seq(2,4,1),
+    gamma = 0 ,
+    colsample_bytree = 1,
+    min_child_weight=seq(1,3,1),
+    subsample= 0.5
+  )
+  
+  
+  suppressWarnings(set.seed(1,sample.kind="Rounding"))
+  xgb_tune_2 <- train( score ~.,data= data.matrix(trainx),
+                       trControl = xgb_trcontrol ,
+                       tuneGrid = xgb_grid_2,
+                       objective="reg:squarederror",
+                       method = "xgbTree")
+  
+  tuneplot(xgb_tune_2)
+  xgb_tune_2$bestTune
+  
+  # tuning column and row sampling
+  
+  
+  xgb_grid_3 <- expand.grid(
+    nrounds = seq(200, 1000, 50),
+    eta= xgb_tune_1$bestTune$eta, 
+    max_depth=xgb_tune_2$bestTune$max_depth, 
+    gamma = 0 ,
+    colsample_bytree = seq(0.4, 1, 0.2),
+    min_child_weight=xgb_tune_2$bestTune$min_child_weight,
+    subsample= c(0.35, 0.5, 0.75)
+  )
+  
+  
+  
+  
+  suppressWarnings(set.seed(1,sample.kind="Rounding"))
+  xgb_tune_3 <- train(score ~., data= data.matrix(trainx) ,
+                      trControl = xgb_trcontrol ,
+                      tuneGrid = xgb_grid_3,
+                      objective="reg:squarederror",
+                      method = "xgbTree")
+  
+  tuneplot(xgb_tune_3, probs = .95)
+  xgb_tune_3$bestTune
+  
+  
+  # tuning gamma
+  
+  xgb_grid_4 <- expand.grid(
+    nrounds = seq(100, 350, 50),
+    eta= xgb_tune_1$bestTune$eta, #0.05
+    max_depth=xgb_tune_2$bestTune$max_depth, #3
+    gamma = c(0, 1, 3, 5, 7 , 10) , 
+    colsample_bytree = xgb_tune_3$bestTune$colsample_bytree, # 0.8
+    min_child_weight=xgb_tune_2$bestTune$min_child_weight, # 3
+    subsample = xgb_tune_3$bestTune$subsample #0.5
+  )
+  
+  suppressWarnings(set.seed(1,sample.kind="Rounding"))
+  xgb_tune_4 <- train(score ~., data= data.matrix(trainx) ,
+                      trControl = xgb_trcontrol ,
+                      tuneGrid = xgb_grid_4,
+                      objective="reg:squarederror",
+                      method = "xgbTree")
+  
+  tuneplot(xgb_tune_4, probs = .95)
+  xgb_tune_4$bestTune
+  
+  # reducing the learning rate (eta)
+  
+  xgb_grid_5 <- expand.grid(
+    nrounds = seq(100, 350, 50),
+    eta= c(0.01, 0.015, 0.025, 0.05, 0.1), #0.05
+    max_depth=xgb_tune_2$bestTune$max_depth, #3
+    gamma = xgb_tune_4$bestTune$gamma , 
+    colsample_bytree = xgb_tune_3$bestTune$colsample_bytree, # 0.8
+    min_child_weight=xgb_tune_2$bestTune$min_child_weight, # 3
+    subsample = xgb_tune_3$bestTune$subsample #0.5
+  )
+  
+  suppressWarnings(set.seed(1,sample.kind="Rounding"))
+  xgb_tune_5 <- train(score ~., data= data.matrix(trainx) ,
+                      trControl = xgb_trcontrol ,
+                      tuneGrid = xgb_grid_5,
+                      objective="reg:squarederror",
+                      method = "xgbTree")
+  
+  tuneplot(xgb_tune_5, probs = .95)
+  xgb_tune_5$bestTune
+  
+}
+
 xgb_tune_train <- function(x) {
   
   h <- paste0(x, "_Scale_score")
   
   set.seed(1,sample.kind="Rounding")
-  tune <- xgb_tune(cbind(train_clean, score=train_dev[,h]), 
-                   cbind(test_clean, score=test[,h]))
+  tune <- xgb_tune2(x="E")
   
   trainx <- xgb.DMatrix(data=data.matrix(train_clean),
                         label=data.matrix(train_dev[,h]))
@@ -643,6 +802,7 @@ xgb_tune_train <- function(x) {
   cor(p, test[,h])
   
 }
+
 
 glmnet_test <- function(x){
   
@@ -692,7 +852,7 @@ set.seed(1, sample.kind="Rounding")
 senti_model <- train(O~., data=senti_td, method="Rborist", ntree=500)
 senti_pred <- predict(senti_model, senti_test)
 
-O_final <- cor(senti_pred, senti_test[,"O"])
+O_final <- cor(senti_pred, senti_test$O)
 
 
 # Training Concientiousness wtih Rborist
@@ -779,7 +939,6 @@ lm_cors <- mapply(lm_function,
 
 print(lm_cors)
 
-beep()
 
 
 
